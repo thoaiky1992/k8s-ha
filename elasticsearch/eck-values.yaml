@@ -1,0 +1,21 @@
+# Hai replica operator trên hai node khác nhau.
+replicaCount: 2
+podLabels:
+  ha-operator: eck
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            ha-operator: eck
+        topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              ha-operator: eck
+          topologyKey: topology.kubernetes.io/zone
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

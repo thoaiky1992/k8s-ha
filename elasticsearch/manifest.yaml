@@ -1,0 +1,57 @@
+# ECK quản lý StatefulSet, Service, chứng chỉ TLS và PVC của ba node.
+# Chỉ triển khai sau khi kiểm tra điều kiện trong ELASTICSEARCH.md.
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: search
+  namespace: elasticsearch
+spec:
+  version: 9.5.5
+  # Giữ PVC khi xóa CR; giảm số node vẫn xóa PVC của node bị giảm.
+  volumeClaimDeletePolicy: DeleteOnScaledownOnly
+  auth:
+    fileRealm:
+      - secretName: elastic-auth
+      - secretName: elastic-roles
+  nodeSets:
+    - name: default
+      count: 3
+      # ECK 3.4+ phân bố Pod theo AZ và cấu hình shard allocation awareness.
+      zoneAwareness:
+        topologyKey: topology.kubernetes.io/zone
+      podTemplate:
+        spec:
+          # Elasticsearch 8.16+ cần vm.max_map_count=1048576 khi dùng mmap.
+          # Init container cần quyền privileged; thay bằng cấu hình trên node nếu
+          # cluster áp dụng Pod Security policy không cho phép privileged.
+          initContainers:
+            - name: sysctl
+              securityContext:
+                privileged: true
+                runAsUser: 0
+              command: ["sh", "-c", "sysctl -w vm.max_map_count=1048576"]
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      elasticsearch.k8s.elastic.co/cluster-name: search
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 4Gi
+                limits:
+                  memory: 4Gi
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: elasticsearch-gp3
+            resources:
+              requests:
+                storage: 20Gi

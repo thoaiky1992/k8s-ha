@@ -1,0 +1,19 @@
+# TCP 443 passes TLS through to the HTTPS listener managed by ECK on port 5601.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-public
+  namespace: kibana
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+spec:
+  type: LoadBalancer
+  ports:
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 5601
+  selector:
+    kibana.k8s.elastic.co/name: kibana

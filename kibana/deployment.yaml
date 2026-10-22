@@ -1,0 +1,31 @@
+# ECK creates and manages the Kibana Deployment, credentials, and TLS connection.
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: kibana
+  namespace: kibana
+spec:
+  version: 9.5.5
+  count: 2
+  elasticsearchRef:
+    name: search
+    namespace: elasticsearch
+  podTemplate:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    kibana.k8s.elastic.co/name: kibana
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2500Mi
