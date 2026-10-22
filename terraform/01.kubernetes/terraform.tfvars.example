@@ -1,0 +1,10 @@
+region = "ap-southeast-1"
+env = "dev"
+eks_name = "demo"
+eks_version = "1.36"
+networking_state = {
+  bucket = "dev-kubernetes-terraform-state"
+  key    = "networking.tfstate"
+  region = "ap-southeast-1"
+}
+route53_zone_names = ["aws-kibana.thoaiky.com"]

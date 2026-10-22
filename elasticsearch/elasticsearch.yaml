@@ -1,0 +1,87 @@
+# ECK quản lý StatefulSet, Service, chứng chỉ TLS và PVC của ba node.
+# Chỉ triển khai sau khi kiểm tra điều kiện trong ELASTICSEARCH.md.
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: search
+  namespace: elasticsearch
+spec:
+  version: 9.5.5
+  # ECK cấp và tự xoay vòng chứng chỉ HTTPS cho Service search-es-http.
+  # TLS transport giữa các node cũng do ECK quản lý.
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: false
+  # Giữ PVC khi xóa CR; giảm số node vẫn xóa PVC của node bị giảm.
+  volumeClaimDeletePolicy: DeleteOnScaledownOnly
+  auth:
+    fileRealm:
+      - secretName: elastic-auth
+      - secretName: elastic-roles
+  nodeSets:
+    - name: default
+      count: 3
+      # ECK 3.4+ phân bố Pod theo AZ và cấu hình shard allocation awareness.
+      zoneAwareness:
+        topologyKey: topology.kubernetes.io/zone
+      podTemplate:
+        spec:
+          # EKS Pod Identity ánh xạ ServiceAccount này tới IAM role có quyền S3 snapshot.
+          serviceAccountName: elasticsearch-s3
+          # Elasticsearch 8.16+ cần vm.max_map_count=1048576 khi dùng mmap.
+          # Init container cần quyền privileged; thay bằng cấu hình trên node nếu
+          # cluster áp dụng Pod Security policy không cho phép privileged.
+          initContainers:
+            - name: sysctl
+              securityContext:
+                privileged: true
+                runAsUser: 0
+              command: ["sh", "-c", "sysctl -w vm.max_map_count=1048576"]
+            # Elasticsearch chỉ cho repository-s3 đọc token nằm dưới ES_PATH_CONF.
+            # EKS cấp token gốc tại /var/run/secrets/pods.eks.amazonaws.com/...
+            # https://docs.aws.amazon.com/eks/latest/userguide/pod-id-how-it-works.html
+            - name: configure-eks-pod-identity
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  token_file=/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
+                  target_dir=/usr/share/elasticsearch/config/repository-s3
+                  test -r "${token_file}"
+                  mkdir -p "${target_dir}"
+                  ln -sfn "${token_file}" "${target_dir}/eks-pod-identity-token"
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      elasticsearch.k8s.elastic.co/cluster-name: search
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: elasticsearch
+              env:
+                # Khi một biến container credential đã có sẵn, EKS không inject
+                # biến còn lại; vì vậy phải khai báo cả endpoint và token symlink.
+                # https://docs.aws.amazon.com/eks/latest/userguide/pod-id-how-it-works.html
+                - name: AWS_CONTAINER_CREDENTIALS_FULL_URI
+                  value: http://169.254.170.23/v1/credentials
+                - name: AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
+                  value: /usr/share/elasticsearch/config/repository-s3/eks-pod-identity-token
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 4Gi
+                limits:
+                  memory: 4Gi
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: elasticsearch-gp3
+            resources:
+              requests:
+                storage: 50Gi

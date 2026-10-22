@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-api
+  namespace: app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: node-api
+  template:
+    metadata:
+      labels:
+        app: node-api
+    spec:
+      containers:
+        - name: node-api
+          # Build và push Dockerfile trong thư mục app, rồi thay image này.
+          image: ghcr.io/your-org/node-api:1.0.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: ELASTICSEARCH_URL
+              value: https://search-es-http.elasticsearch.svc:9200
+            - name: ELASTICSEARCH_CA_FILE
+              value: /etc/backend-ca/elasticsearch-ca.crt
+            - name: REDIS_SENTINEL_HOST
+              value: redis-sentinel-sentinel.redis-sentinel.svc
+            - name: REDIS_SENTINEL_PORT
+              value: "26379"
+            - name: REDIS_MASTER_NAME
+              value: mymaster
+            - name: REDIS_CA_FILE
+              value: /etc/backend-ca/redis-sentinel-ca.crt
+          envFrom:
+            - secretRef:
+                name: backend-credentials
+          volumeMounts:
+            - name: backend-ca
+              mountPath: /etc/backend-ca
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: backend-ca
+          configMap:
+            name: backend-ca

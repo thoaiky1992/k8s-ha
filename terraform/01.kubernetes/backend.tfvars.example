@@ -1,0 +1,3 @@
+bucket       = "dev-kubernetes-terraform-state"
+key          = "kubernetes.tfstate"
+region       = "ap-southeast-1"

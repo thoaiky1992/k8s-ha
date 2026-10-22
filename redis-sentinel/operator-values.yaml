@@ -1,0 +1,21 @@
+# OT Redis Operator 0.27.0. Operator chỉ theo dõi namespace redis-sentinel.
+redisOperator:
+  watchNamespace: redis-sentinel
+  podLabels:
+    ha-operator: redis-sentinel
+
+replicas: 2
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            ha-operator: redis-sentinel
+        topologyKey: kubernetes.io/hostname
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 500Mi

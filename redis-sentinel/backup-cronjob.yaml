@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis-sentinel-backup
+  namespace: redis-sentinel
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-sentinel-backup
+  namespace: redis-sentinel
+spec:
+  schedule: "0 1 * * *"
+  timeZone: Asia/Ho_Chi_Minh
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 7200
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: redis-sentinel-backup
+        spec:
+          serviceAccountName: redis-sentinel-backup
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: thoaiky1992/redis-sentinel-backup:1.0.0
+              imagePullPolicy: IfNotPresent
+              # /bin/sh trong image là dash, không hỗ trợ pipefail/mapfile của script.
+              command: ["/bin/bash", "/backup-script/backup.sh"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: AWS_REGION
+                  value: ap-southeast-1
+                - name: S3_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: redis-sentinel-backup
+                      key: S3_BUCKET
+                - name: S3_PREFIX
+                  valueFrom:
+                    configMapKeyRef:
+                      name: redis-sentinel-backup
+                      key: S3_PREFIX
+                - name: REDIS_SENTINEL_HOST
+                  value: redis-sentinel-sentinel.redis-sentinel.svc.cluster.local
+                - name: REDIS_SENTINEL_PORT
+                  value: "26379"
+                - name: REDIS_MASTER_NAME
+                  value: mymaster
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-sentinel-auth
+                      key: redis-password
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /backup-script
+                  readOnly: true
+                - name: redis-tls
+                  mountPath: /tls
+                  readOnly: true
+                - name: backup-work
+                  mountPath: /backup
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+                  ephemeral-storage: 25Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+          volumes:
+            - name: backup-script
+              configMap:
+                name: redis-sentinel-backup
+                defaultMode: 365 # 0555
+            - name: redis-tls
+              secret:
+                secretName: redis-sentinel-tls
+                defaultMode: 288 # 0440
+            - name: backup-work
+              emptyDir:
+                sizeLimit: 25Gi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 256Mi

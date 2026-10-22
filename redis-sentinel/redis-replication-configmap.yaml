@@ -1,0 +1,14 @@
+# RedisReplication.spec.redisConfig.additionalRedisConfig trỏ tới ConfigMap này.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-sentinel-redis-config
+  namespace: redis-sentinel
+data:
+  redis-additional.conf: |
+    appendonly yes
+    save ""
+    maxmemory 1gb
+    maxmemory-policy noeviction
+    tls-auth-clients no
+    tls-replication yes

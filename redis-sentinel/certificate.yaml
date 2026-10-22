@@ -1,0 +1,75 @@
+# Chạy sau khi Terraform đã cài cert-manager và tạo namespace redis-sentinel.
+# CA chỉ dùng trong namespace redis-sentinel; lưu và quản lý việc xoay vòng CA riêng.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: redis-sentinel-selfsigned
+  namespace: redis-sentinel
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: redis-sentinel-ca
+  namespace: redis-sentinel
+spec:
+  isCA: true
+  commonName: redis-sentinel-ca
+  secretName: redis-sentinel-ca
+  duration: 87600h # 10 năm; cần kế hoạch xoay vòng CA trước khi hết hạn.
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Never
+  usages:
+    - cert sign
+    - crl sign
+  issuerRef:
+    name: redis-sentinel-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: redis-sentinel-ca
+  namespace: redis-sentinel
+spec:
+  ca:
+    secretName: redis-sentinel-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: redis-sentinel-tls
+  namespace: redis-sentinel
+spec:
+  secretName: redis-sentinel-tls
+  duration: 2160h # 90 ngày.
+  renewBefore: 360h # Gia hạn 15 ngày trước khi hết hạn.
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  dnsNames:
+    - redis-sentinel
+    - redis-sentinel.redis-sentinel
+    - redis-sentinel.redis-sentinel.svc
+    - redis-sentinel.redis-sentinel.svc.cluster.local
+    - redis-sentinel-sentinel
+    - redis-sentinel-sentinel.redis-sentinel
+    - redis-sentinel-sentinel.redis-sentinel.svc
+    - redis-sentinel-sentinel.redis-sentinel.svc.cluster.local
+    - "*.redis-sentinel.svc"
+    - "*.redis-sentinel.svc.cluster.local"
+    - "*.redis-sentinel-headless.redis-sentinel.svc"
+    - "*.redis-sentinel-headless.redis-sentinel.svc.cluster.local"
+    - "*.redis-sentinel-sentinel-headless.redis-sentinel.svc"
+    - "*.redis-sentinel-sentinel-headless.redis-sentinel.svc.cluster.local"
+  issuerRef:
+    name: redis-sentinel-ca
+    kind: Issuer

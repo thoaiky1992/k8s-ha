@@ -1,0 +1,57 @@
+# Sentinel CR riêng để cấu hình TLS; operator 0.27.0 không truyền TLS
+# từ RedisReplication sang Sentinel nhúng.
+apiVersion: redis.redis.opstreelabs.in/v1beta2
+kind: RedisSentinel
+metadata:
+  name: redis-sentinel
+  namespace: redis-sentinel
+spec:
+  clusterSize: 3
+  redisSentinelConfig:
+    redisReplicationName: redis-sentinel
+    redisReplicationPassword:
+      secretKeyRef:
+        name: redis-sentinel-auth
+        key: redis-password
+    masterGroupName: mymaster
+    redisPort: "6379"
+    quorum: "2"
+    resolveHostnames: "yes"
+    announceHostnames: "yes"
+    additionalSentinelConfig: redis-sentinel-config
+  TLS:
+    ca: ca.crt
+    cert: tls.crt
+    key: tls.key
+    secret:
+      secretName: redis-sentinel-tls
+      optional: false
+      defaultMode: 288 # 0440; fsGroup 1000 đọc được khóa riêng.
+  env:
+    - name: REDIS_TLS_CA_KEY
+      value: /tls/ca.crt
+  kubernetesConfig:
+    image: quay.io/opstree/redis-sentinel:v7.0.15
+    imagePullPolicy: IfNotPresent
+    redisSecret:
+      name: redis-sentinel-auth
+      key: redis-password
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  podSecurityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              role: sentinel
+          topologyKey: topology.kubernetes.io/zone
+  pdb:
+    enabled: true
+    minAvailable: 2

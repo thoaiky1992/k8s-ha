@@ -1,0 +1,65 @@
+# OT Redis Operator tạo StatefulSet Redis replication từ CR này.
+apiVersion: redis.redis.opstreelabs.in/v1beta2
+kind: RedisReplication
+metadata:
+  name: redis-sentinel
+  namespace: redis-sentinel
+spec:
+  clusterSize: 3
+  TLS:
+    ca: ca.crt
+    cert: tls.crt
+    key: tls.key
+    secret:
+      secretName: redis-sentinel-tls
+      optional: false
+      defaultMode: 288 # 0440; fsGroup 1000 đọc được khóa riêng.
+  # Ảnh quay.io/opstree/redis:v7.0.15 vẫn đọc tên biến cũ này.
+  env:
+    - name: REDIS_TLS_CA_KEY
+      value: /tls/ca.crt
+  kubernetesConfig:
+    image: quay.io/opstree/redis:v7.0.15
+    imagePullPolicy: IfNotPresent
+    service:
+      serviceType: ClusterIP
+    redisSecret:
+      name: redis-sentinel-auth
+      key: redis-password
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Retain
+      whenScaled: Retain
+  redisExporter:
+    enabled: false
+    image: quay.io/opstree/redis-exporter:v1.44.0
+  redisConfig:
+    additionalRedisConfig: redis-sentinel-redis-config
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: redis-sentinel-gp3
+        resources:
+          requests:
+            storage: 20Gi
+  podSecurityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: redis-sentinel
+              role: replication
+          topologyKey: topology.kubernetes.io/zone
+  pdb:
+    enabled: true
+    minAvailable: 2

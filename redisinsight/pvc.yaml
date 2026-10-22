@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redisinsight-data
+  namespace: redis-sentinel
+  labels:
+    app: redisinsight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: redis-sentinel-gp3
+  resources:
+    requests:
+      storage: 5Gi
