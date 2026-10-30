@@ -1,4 +1,4 @@
-# ECK quản lý StatefulSet, Service, chứng chỉ TLS và PVC của ba node.
+# ECK quản lý StatefulSet, Service, chứng chỉ TLS và PVC của sáu node (2 node mỗi AZ).
 # Chỉ triển khai sau khi kiểm tra điều kiện trong ELASTICSEARCH.md.
 apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
@@ -21,12 +21,16 @@ spec:
       - secretName: elastic-roles
   nodeSets:
     - name: default
-      count: 3
+      # Sáu node, mỗi node đều là master-eligible: quorum là 4, nên mất một AZ (2 node) vẫn giữ quorum.
+      count: 6
       # ECK 3.4+ phân bố Pod theo AZ và cấu hình shard allocation awareness.
       zoneAwareness:
         topologyKey: topology.kubernetes.io/zone
       podTemplate:
         spec:
+          # Chỉ đặt Pod lên node group elasticsearch (Terraform: 01.nodes.tf).
+          nodeSelector:
+            workload: elasticsearch
           # EKS Pod Identity ánh xạ ServiceAccount này tới IAM role có quyền S3 snapshot.
           serviceAccountName: elasticsearch-s3
           # Elasticsearch 8.16+ cần vm.max_map_count=1048576 khi dùng mmap.

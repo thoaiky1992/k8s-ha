@@ -28,7 +28,7 @@ metadata:
   namespace: kibana
   annotations:
     # Get certificate-arn from ACM (AWS Certificate Manager), Output from terraform module: 01.kubernetes
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:945129430338:certificate/775559f1-8a9c-4bbe-bcda-ff8d49f6eb58
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:945129430338:certificate/fe541066-8328-4052-8d0e-317b72b68208
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/scheme: internet-facing

@@ -41,12 +41,19 @@ resource "aws_iam_policy" "cluster_autoscaler" {
         Resource = "*"
       },
       {
+        # Chỉ thay đổi ASG của node group cluster này được gắn tag discovery (01.nodes.tf).
         Effect = "Allow"
         Action = [
           "autoscaling:SetDesiredCapacity",
           "autoscaling:TerminateInstanceInAutoScalingGroup"
         ]
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled"                     = "true"
+            "aws:ResourceTag/k8s.io/cluster-autoscaler/${aws_eks_cluster.eks.name}" = "owned"
+          }
+        }
       },
     ]
   })
@@ -84,12 +91,21 @@ resource "helm_release" "cluster_autoscaler" {
     {
       name  = "awsRegion"
       value = var.region
+    },
+    {
+      # Hai node group có label khác nhau, nên không coi là "similar" để cân bằng.
+      # least-waste chọn group có độ lãng phí tài nguyên thấp nhất cho pod không có nodeSelector.
+      name  = "extraArgs.expander"
+      value = "least-waste"
     }
   ]
 
+  # Autoscaler chỉ tự tìm ASG có tag discovery; hai node group này được tạo trước khi bật autoscaler.
   depends_on = [
     aws_eks_cluster.eks,
-    aws_eks_node_group.general,
+    aws_eks_node_group.elasticsearch,
+    # aws_eks_node_group.redis,
+    # aws_eks_node_group.node_api,
     helm_release.metrics_server
   ]
 }

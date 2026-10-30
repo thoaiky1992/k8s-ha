@@ -13,6 +13,9 @@ spec:
     namespace: elasticsearch
   podTemplate:
     spec:
+      # Chạy cùng node group elasticsearch (Terraform: 01.nodes.tf).
+      nodeSelector:
+        workload: elasticsearch
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

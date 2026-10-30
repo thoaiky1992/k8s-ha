@@ -13,6 +13,8 @@ spec:
       labels:
         app: node-api
     spec:
+      nodeSelector:
+        workload: node-api
       containers:
         - name: node-api
           # Build và push Dockerfile trong thư mục app, rồi thay image này.
@@ -23,18 +25,24 @@ spec:
           env:
             - name: PORT
               value: "3000"
+            # Bật (true) hoặc tắt (false) từng backend. Backend bị tắt không cần biến kết nối của nó.
+            - name: ELASTICSEARCH_ENABLED
+              value: "true"
+            - name: REDIS_CLUSTER_ENABLED
+              value: "true"
             - name: ELASTICSEARCH_URL
               value: https://search-es-http.elasticsearch.svc:9200
             - name: ELASTICSEARCH_CA_FILE
               value: /etc/backend-ca/elasticsearch-ca.crt
-            - name: REDIS_SENTINEL_HOST
-              value: redis-sentinel-sentinel.redis-sentinel.svc
-            - name: REDIS_SENTINEL_PORT
-              value: "26379"
-            - name: REDIS_MASTER_NAME
-              value: mymaster
-            - name: REDIS_CA_FILE
-              value: /etc/backend-ca/redis-sentinel-ca.crt
+            # Một node bất kỳ của cluster; client đọc topology từ đây rồi định tuyến theo slot.
+            - name: REDIS_CLUSTER_HOST
+              value: redis-cluster-leader.redis-cluster.svc
+            - name: REDIS_CLUSTER_PORT
+              value: "6379"
+            - name: REDIS_CLUSTER_CA_FILE
+              value: /etc/backend-ca/redis-cluster-ca.crt
+            - name: LOG_LEVEL
+              value: info
           envFrom:
             - secretRef:
                 name: backend-credentials

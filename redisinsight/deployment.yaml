@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redisinsight
-  namespace: redis-sentinel
+  namespace: redisinsight
   labels:
     app: redisinsight
 spec:
@@ -17,6 +17,9 @@ spec:
       labels:
         app: redisinsight
     spec:
+      # Chỉ đặt Pod lên node group redis (Terraform: 01.nodes.tf).
+      nodeSelector:
+        workload: redis
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -90,8 +93,9 @@ spec:
           persistentVolumeClaim:
             claimName: redisinsight-data
         - name: redis-ca
-          secret:
-            secretName: redis-sentinel-tls
+          configMap:
+            # ConfigMap do README tạo từ ca.crt của Secret redis-cluster-tls (namespace redis-cluster).
+            name: redis-cluster-ca
             defaultMode: 292 # 0444; chỉ project chứng chỉ CA công khai.
             items:
               - key: ca.crt

@@ -1,6 +1,6 @@
 # Elasticsearch HA trên EKS với Elastic Cloud on Kubernetes (ECK)
 
-Bộ file này cài **ECK operator bằng Helm** và tạo Elasticsearch 3 node, mỗi node trên một host và một AZ khác nhau. Mỗi node dùng PVC EBS gp3 riêng. Endpoint nội bộ là `https://search-es-http.elasticsearch.svc:9200`. Manifest bật rõ ràng HTTPS với chứng chỉ tự ký do ECK tự cấp và xoay vòng; TLS transport giữa các node cũng do ECK quản lý. Đây là cấu hình nền; cần tính dung lượng theo dữ liệu thực tế và cấu hình snapshot trước khi phục vụ dữ liệu production.
+Bộ file này cài **ECK operator bằng Helm** và tạo Elasticsearch 6 node, mỗi AZ 2 node trên 3 AZ, mỗi node trên một host khác nhau. Mỗi node dùng PVC EBS gp3 riêng. Với 6 node master-eligible, quorum là 4: cụm chịu được mất một node hoặc một AZ. Endpoint nội bộ là `https://search-es-http.elasticsearch.svc:9200`. Manifest bật rõ ràng HTTPS với chứng chỉ tự ký do ECK tự cấp và xoay vòng; TLS transport giữa các node cũng do ECK quản lý. Đây là cấu hình nền; cần tính dung lượng theo dữ liệu thực tế và cấu hình snapshot trước khi phục vụ dữ liệu production.
 
 ## Các file
 
@@ -10,9 +10,9 @@ Bộ file này cài **ECK operator bằng Helm** và tạo Elasticsearch 3 node,
 | `pv.yaml` | StorageClass `elasticsearch-gp3` cho EBS CSI; PV thật được cấp động. |
 | `pvc.yaml` | PVC và Pod **thử storage**, chỉ áp dụng thủ công khi cần kiểm tra. |
 | `secret.yaml.example` | Mẫu Secret chứa mật khẩu tài khoản `elastic`. |
-| `serviceaccount.yaml` | ServiceAccount `elasticsearch-s3` được EKS Pod Identity ánh xạ tới IAM role snapshot. |
-| `elasticsearch.yaml` | Elasticsearch CR; ECK tạo 3 PVC từ `volumeClaimTemplates`. |
-| `eck-values.yaml` | 2 replica operator, tách node bằng pod anti-affinity. |
+| `service-account.yaml` | ServiceAccount `elasticsearch-s3` được EKS Pod Identity ánh xạ tới IAM role snapshot. |
+| `elasticsearch.yaml` | Elasticsearch CR 6 node (2 node mỗi AZ); ECK tạo 6 PVC từ `volumeClaimTemplates`. |
+| `eck-values.yaml` | 3 replica operator, tách node bằng pod anti-affinity. |
 
 Không tạo PV tĩnh hoặc áp dụng `pvc.yaml` trong lệnh cài thông thường: ECK phải quản lý PVC dữ liệu của các node. `reclaimPolicy: Retain` và `volumeClaimDeletePolicy: DeleteOnScaledownOnly` giúp giữ dữ liệu khi xóa Elasticsearch CR; khi giảm `count`, PVC của node bị giảm vẫn có thể bị xóa. Cần kiểm tra PV/EBS volume trước khi dọn tài nguyên.
 
@@ -51,10 +51,10 @@ helm version --short
 - `kubectl`, `jq`, Helm 3 và quyền quản trị để cài CRD toàn cluster. Máy chạy các lệnh phải truy cập được `https://helm.elastic.co`; cluster phải kéo được ảnh từ `docker.elastic.co`.
 - ECK 3.5 hiện hỗ trợ Kubernetes **1.31–1.36**
 - EKS dùng **managed EC2 node group thông thường**, không phải EKS Auto Mode. Cần Amazon EBS CSI Driver (`ebs.csi.aws.com`) với IAM permission tạo EBS volume. [Hướng dẫn EBS CSI của AWS](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html). Nếu dùng EKS Auto Mode, phải đổi provisioner và cách cài theo [StorageClass cho Auto Mode](https://docs.aws.amazon.com/eks/latest/userguide/create-storage-class.html).
-- Ít nhất **3 node Ready trên 3 AZ**, mỗi node còn ít nhất 2 vCPU và 4 GiB RAM cho Elasticsearch, cộng tài nguyên hệ thống và operator. Cấu hình Terraform tạo [node group riêng cho AZ thứ ba](../terraform/01.kubernetes/01.nodes.tf) với `min_size = 3`; áp dụng tầng networking rồi tầng Kubernetes và xác nhận node mới đã Ready trước khi cài. EBS gắn với AZ của PVC; sau sự cố mất AZ, pod dùng PVC cũ không thể tự chuyển sang AZ khác.
+- Ít nhất **6 node Ready trong node group `elasticsearch` (label `workload=elasticsearch`), 2 node mỗi AZ trên 3 AZ**. Node group này được khai báo trong [01.nodes.tf](../terraform/01.kubernetes/01.nodes.tf) với `min_size = desired_size = 6`, instance `t3.large`; Kibana cũng chạy trên node group này. Node group `redis` riêng cho Redis và RedisInsight. Áp dụng tầng networking rồi tầng Kubernetes và xác nhận sáu node đã Ready, phân bổ đều ba AZ, trước khi cài. EBS gắn với AZ của PVC; sau sự cố mất AZ, pod dùng PVC cũ không thể tự chuyển sang AZ khác.
 - `KUBE_CONTEXT` phải trỏ đúng cluster. Kiểm tra bằng `kubectl config get-contexts` và `kubectl --context "$KUBE_CONTEXT" get nodes -o wide`.
 - Init container `sysctl` trong `elasticsearch.yaml` cần quyền `privileged` để đặt `vm.max_map_count=1048576`. Nếu chính sách cluster không cho phép, cấu hình sysctl trên node hoặc qua DaemonSet được quản trị riêng trước khi cài, rồi bỏ init container. [Hướng dẫn Elastic về mmap](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/virtual-memory).
-- EKS Pod Identity Agent phải chạy trên các worker node. Terraform đã khai báo add-on này tại [`06.pad-identity-addon.tf`](../terraform/01.kubernetes/06.pad-identity-addon.tf), IAM role/quyền S3 và association cho `elasticsearch/elasticsearch-s3` tại [`12.elasticsearch-backup.tf`](../terraform/01.kubernetes/12.elasticsearch-backup.tf). Áp dụng tầng `terraform/01.kubernetes` trước khi tạo Elasticsearch Pod.
+- EKS Pod Identity Agent phải chạy trên các worker node. Terraform đã khai báo add-on này tại [`06.pad-identity-addon.tf`](../terraform/01.kubernetes/06.pad-identity-addon.tf), IAM role/quyền S3 và association cho `elasticsearch/elasticsearch-s3` tại [`13.elasticsearch-backup.tf`](../terraform/01.kubernetes/13.elasticsearch-backup.tf). Áp dụng tầng `terraform/01.kubernetes` trước khi tạo Elasticsearch Pod.
 EBS CSI add-on và IAM role dùng Pod Identity được khai báo tại [`terraform/01.kubernetes/09.ebs-csi-driver.tf`](../terraform/01.kubernetes/09.ebs-csi-driver.tf). Áp dụng Terraform trước khi tạo PVC Elasticsearch; nếu dùng hạ tầng khác, cài driver và IAM permission theo [hướng dẫn AWS](https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html). Nếu pod `Pending` và PVC báo `ExternalProvisioning`, kiểm tra `kubectl get csidriver ebs.csi.aws.com` và pod `ebs-csi-controller` trong `kube-system`.
 
 ## Cấu hình kubeconfig
@@ -67,52 +67,11 @@ aws eks update-kubeconfig --region <region> --name <cluster-name>
 
 ## Kiểm tra trước khi cài
 
-Chạy khối lệnh này từ thư mục gốc repo. Nó chỉ đọc Kubernetes API và dừng với mã lỗi nếu cluster chưa đáp ứng phiên bản ECK 3.5, ba AZ hoặc EBS CSI. Cập nhật dải phiên bản khi đổi phiên bản operator theo [ma trận hỗ trợ ECK](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s).
+Chạy script preflight từ thư mục gốc repo. Script chỉ đọc Kubernetes API và dừng với mã lỗi nếu cluster chưa đáp ứng phiên bản ECK 3.5, sáu node Ready của node group `elasticsearch` phân bổ trên ba AZ với tối thiểu hai node mỗi AZ, hoặc EBS CSI. Cập nhật dải phiên bản khi đổi phiên bản operator theo [ma trận hỗ trợ ECK](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s).
 
 ```bash
 export KUBE_CONTEXT="$(kubectl config current-context)"
-bash <<'BASH'
-set -euo pipefail
-
-: "${KUBE_CONTEXT:?Đặt KUBE_CONTEXT tới cluster cần kiểm tra}"
-command -v kubectl >/dev/null || { echo 'Thiếu kubectl' >&2; exit 1; }
-command -v jq >/dev/null || { echo 'Thiếu jq' >&2; exit 1; }
-
-kubectl_cmd=(kubectl --context "$KUBE_CONTEXT" --request-timeout=20s)
-failed=0
-
-echo "Kiểm tra context: $KUBE_CONTEXT"
-version_json="$("${kubectl_cmd[@]}" get --raw /version)"
-k8s_version="$(jq -r '.gitVersion' <<<"$version_json")"
-k8s_minor="$(jq -r '.minor | capture("(?<minor>[0-9]+)").minor | tonumber' <<<"$version_json")"
-echo "Kubernetes: $k8s_version"
-if (( k8s_minor < 31 || k8s_minor > 36 )); then
-  echo 'FAIL: ECK 3.5 hỗ trợ Kubernetes 1.31–1.36 theo tài liệu Elastic hiện tại.' >&2
-  failed=1
-fi
-
-nodes_json="$("${kubectl_cmd[@]}" get nodes -o json)"
-ready_nodes="$(jq '[.items[] | select(.spec.unschedulable != true) | select(any(.status.conditions[]; .type == "Ready" and .status == "True"))] | length' <<<"$nodes_json")"
-ready_zones="$(jq '[.items[] | select(.spec.unschedulable != true) | select(any(.status.conditions[]; .type == "Ready" and .status == "True")) | .metadata.labels["topology.kubernetes.io/zone"] // empty] | unique | length' <<<"$nodes_json")"
-echo "Node Ready có thể lập lịch: $ready_nodes; AZ: $ready_zones"
-if (( ready_nodes < 3 || ready_zones < 3 )); then
-  echo 'FAIL: Cần ít nhất ba node Ready, mỗi node ở một AZ khác nhau.' >&2
-  failed=1
-fi
-
-if "${kubectl_cmd[@]}" get csidriver ebs.csi.aws.com >/dev/null 2>&1; then
-  echo 'EBS CSI driver: có'
-else
-  echo 'FAIL: Chưa có Amazon EBS CSI driver (ebs.csi.aws.com).' >&2
-  failed=1
-fi
-
-if (( failed )); then
-  echo 'Preflight chưa đạt; không cài ECK/Elasticsearch.' >&2
-  exit 1
-fi
-echo 'Preflight đạt. Tiếp tục kiểm tra sizing, snapshot và quyền privileged trước khi cài.'
-BASH
+bash elasticsearch/check.sh
 ```
 
 ## Cài operator và Elasticsearch
@@ -147,9 +106,9 @@ kubectl --context "$KUBE_CONTEXT" wait --for=condition=Established \
 # Tạo Secret xác thực, ServiceAccount dùng Pod Identity, roles và Elasticsearch cluster.
 kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/secret.yaml
 
-kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/serviceaccount.yaml
+kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/service-account.yaml
 
-kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/rolemapping.yaml
+kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/role-mapping.yaml
 
 kubectl --context "$KUBE_CONTEXT" apply -f elasticsearch/elasticsearch.yaml
 
@@ -186,10 +145,16 @@ ECK lưu CA công khai tại Secret `search-es-http-certs-public`. Xuất CA đ�
 kubectl --context "$KUBE_CONTEXT" -n elasticsearch get secret search-es-http-certs-public \
   -o jsonpath='{.data.ca\.crt}' | base64 --decode > /tmp/search-es-ca.crt
 kubectl --context "$KUBE_CONTEXT" -n elasticsearch port-forward service/search-es-http 9200:9200
+
 # Terminal khác:
 curl --cacert /tmp/search-es-ca.crt \
   --resolve search-es-http.elasticsearch.svc:9200:127.0.0.1 \
   -u elastic https://search-es-http.elasticsearch.svc:9200/
+
+curl -u elastic \
+  --cacert /tmp/search-es-ca.crt \
+  --resolve search-es-http.elasticsearch.svc:9200:127.0.0.1 \
+  https://search-es-http.elasticsearch.svc:9200/_cluster/health?pretty
 ```
 
 Ứng dụng dùng URL HTTPS cùng CA trên. Không tắt bước xác minh chứng chỉ. [Hướng dẫn ECK về TLS](https://www.elastic.co/docs/deploy-manage/security/eck-tls).
@@ -345,7 +310,7 @@ POST /products/_delete_by_query
 
 Snapshot trên EBS cần một repository dùng chung, chẳng hạn S3; không dùng thư mục dữ liệu trên PVC của một Elasticsearch pod làm repository. Trước khi chạy API bên dưới:
 
-- Áp dụng [`12.elasticsearch-backup.tf`](../terraform/01.kubernetes/12.elasticsearch-backup.tf). File này tạo IAM role tin cậy `pods.eks.amazonaws.com`, giới hạn trust theo đúng cluster/namespace/ServiceAccount, cấp quyền S3 chỉ dưới prefix `production/search`, rồi tạo `aws_eks_pod_identity_association` cho namespace `elasticsearch` và ServiceAccount `elasticsearch-s3`.
+- Áp dụng [`13.elasticsearch-backup.tf`](../terraform/01.kubernetes/13.elasticsearch-backup.tf). File này tạo IAM role tin cậy `pods.eks.amazonaws.com`, giới hạn trust theo đúng cluster/namespace/ServiceAccount, cấp quyền S3 chỉ dưới prefix `production/search`, rồi tạo `aws_eks_pod_identity_association` cho namespace `elasticsearch` và ServiceAccount `elasticsearch-s3`.
 - `elasticsearch.yaml` dùng đúng ServiceAccount trên và **không** còn `spec.secureSettings` cho `access_key`/`secret_key`. EKS tự cấp credential tạm thời và tự xoay vòng; không thêm AWS key vào `elastic-auth` hoặc request Dev Tools.
 - Elasticsearch giới hạn file mà repository S3 được đọc. Init container `configure-eks-pod-identity` tạo symlink từ token EKS vào `/usr/share/elasticsearch/config/repository-s3`, trước khi Elasticsearch khởi động. Init container không có biến `ES_PATH_CONF`, nên script dùng đường dẫn config trực tiếp. Manifest đặt cả `AWS_CONTAINER_CREDENTIALS_FULL_URI` và `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` vì EKS xử lý hai biến container credential theo một cặp; không bỏ các biến này hoặc init container.
 - Đăng nhập Kibana bằng user có quyền quản lý snapshot repository và SLM (ví dụ `elastic`). Mở **☰ > Management > Dev Tools**. Có thể truy cập Kibana theo [`KIBANA.md`](../kibana/KIBANA.md); không để endpoint hoặc quyền truy cập Kibana public rộng hơn mức cần thiết.
@@ -522,8 +487,8 @@ DELETE replica-template-check
 
 ## Lưu ý vận hành
 
-- Elasticsearch 3 node chịu được lỗi một node khi shard replica được cấu hình và cluster có tài nguyên đủ. Pod anti-affinity yêu cầu 3 node; khi chỉ còn 2 node, pod thứ ba có thể Pending đến khi node thay thế sẵn sàng.
+- Elasticsearch 6 node, mọi node là master-eligible nên quorum là 4. Cụm chịu được mất một node, hoặc mất một AZ (2 node), mà vẫn giữ quorum; mất hai AZ thì mất quorum và cụm dừng. Khi mất một AZ, cluster có thể `yellow` trong lúc các bản sao được phân bổ lại; kiểm tra bằng `GET _cluster/health`. Pod anti-affinity yêu cầu mỗi node một pod; khi còn 5 node, pod thứ sáu có thể Pending đến khi node thay thế sẵn sàng. Với HA thực sự, index cần `number_of_replicas >= 1` (template mặc định ở trên đặt 1; zone awareness giúp các bản sao của một shard nằm ở AZ khác nhau).
 - EBS volume gắn theo AZ. Pod với PVC đã bound không tự chuyển AZ. Thiết lập snapshot repository trên S3, Snapshot Lifecycle Management (SLM), cảnh báo snapshot lỗi và **thử restore** trước khi đưa dữ liệu production vào. Xem [hướng dẫn cấu hình Snapshot Repository & SLM](#cấu-hình-snapshot-repository--slm-qua-kibana-dev-tools) ở trên và [hướng dẫn snapshot trên ECK](https://www.elastic.co/docs/deploy-manage/tools/snapshot-and-restore/cloud-on-k8s). HA không thay thế backup.
-- `20Gi` mỗi PVC và `4Gi` RAM/1 vCPU mỗi pod chỉ là cấu hình khởi điểm. Tính dung lượng từ tốc độ ghi, thời gian giữ dữ liệu, số replica, watermark, shard và thời gian phục hồi; tăng PVC trước khi gần đầy. Theo dõi heap, disk, CPU, cluster health và số shard.
+- `50Gi` mỗi PVC và `4Gi` RAM/1 vCPU mỗi pod chỉ là cấu hình khởi điểm. Tính dung lượng từ tốc độ ghi, thời gian giữ dữ liệu, số replica, watermark, shard và thời gian phục hồi; tăng PVC trước khi gần đầy. Theo dõi heap, disk, CPU, cluster health và số shard.
 - Muốn tăng dung lượng PVC, tăng `storage` trong `elasticsearch.yaml`; không giảm kích thước hoặc đổi StorageClass của PVC đã tạo. [ECK volume claim templates](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/volume-claim-templates).
 - Trước khi nâng ECK hoặc Elasticsearch, kiểm tra [tài liệu cài ECK bằng Helm](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/install) và quy trình nâng cấp tương ứng. CRD là tài nguyên toàn cluster; không xóa CRD khi chỉ gỡ một Elasticsearch cluster.
