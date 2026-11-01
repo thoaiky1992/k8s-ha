@@ -61,3 +61,28 @@ kubectl --context "$KUBE_CONTEXT" -n kibana port-forward service/kibana-kb-http 
 ALB hiện chỉ mở HTTP công khai. Trước khi dùng production, cấu hình chứng chỉ ACM cho hostname, thêm HTTPS listener và chuyển HTTP sang HTTPS; cân nhắc giới hạn CIDR truy cập bằng annotation `alb.ingress.kubernetes.io/inbound-cidrs`. ECK tiếp tục giữ TLS giữa ALB và Kibana.
 
 Nếu Kibana không lên, kiểm tra `kubectl -n kibana describe kibana kibana`, `kubectl -n kibana describe pod -l kibana.k8s.elastic.co/name=kibana` và log của operator trong `elastic-system`. Cả hai namespace phải được cùng một ECK operator quản lý.
+
+## Gỡ cài đặt theo thứ tự ngược
+
+Gỡ Kibana trước Elasticsearch và trước khi uninstall ECK operator.
+
+```bash
+export KUBE_CONTEXT="$(kubectl config current-context)"
+
+# Xóa Ingress trước để controller dọn ALB và target group.
+kubectl --context "$KUBE_CONTEXT" delete -f kibana/service.yaml \
+  --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" -n kibana wait --for=delete \
+  ingress/kibana --timeout=10m || true
+
+# ECK operator phải còn chạy để finalize Kibana CR và dọn Deployment/Secret liên quan.
+kubectl --context "$KUBE_CONTEXT" delete -f kibana/deployment.yaml \
+  --ignore-not-found=true --wait=true
+kubectl --context "$KUBE_CONTEXT" -n kibana wait --for=delete \
+  kibana/kibana --timeout=10m || true
+
+kubectl --context "$KUBE_CONTEXT" delete namespace kibana \
+  --ignore-not-found=true --wait=true
+```
+
+Kibana không có PVC trong cấu hình này. Nếu DNS được quản lý bằng `terraform/02.dns-records`, xóa record Kibana bằng Terraform sau khi ALB đã được dọn. Chỉ tiếp tục gỡ Elasticsearch/ECK khi `kubectl get kibana -A` không còn CR do operator này quản lý.

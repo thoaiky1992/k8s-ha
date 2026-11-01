@@ -1,0 +1,41 @@
+# Mẫu KafkaConnector Debezium PostgreSQL. Sao chép thành file local, sửa host/database/table, rồi apply.
+# Yêu cầu: PostgreSQL bật wal_level=logical và user có quyền REPLICATION; xem README.md.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: postgres-cdc
+  namespace: kafka
+  labels:
+    # Connector này chạy trên cụm KafkaConnect kafka-connect.
+    strimzi.io/cluster: kafka-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  # Một task cho một replication slot; tăng số task không làm Debezium đọc WAL song song.
+  tasksMax: 1
+  config:
+    database.hostname: ${file:/mnt/postgres-cdc-credentials/postgres.properties:database.hostname}
+    database.port: ${file:/mnt/postgres-cdc-credentials/postgres.properties:database.port}
+    database.dbname: ${file:/mnt/postgres-cdc-credentials/postgres.properties:database.dbname}
+    # Đọc thông tin kết nối từ file properties được mount trong Pod.
+    database.user: ${file:/mnt/postgres-cdc-credentials/postgres.properties:database.user}
+    database.password: ${file:/mnt/postgres-cdc-credentials/postgres.properties:database.password}
+    # verify-full kiểm tra cả chuỗi CA và hostname bằng RDS CA bundle được mount vào Connect.
+    database.sslmode: verify-full
+    database.sslrootcert: /mnt/rds-ca/global-bundle.pem
+    topic.prefix: pg
+    plugin.name: pgoutput
+    slot.name: debezium_cdc
+    publication.name: debezium_cdc_pub
+    # Publication được tạo trước bằng postgres_admin để user Debezium không cần
+    # quyền CREATE trên database hoặc ownership của bảng.
+    publication.autocreate.mode: disabled
+    table.include.list: public.orders
+    snapshot.mode: initial
+    heartbeat.interval.ms: "10000"
+    decimal.handling.mode: "string"
+    # Debezium mặc định tạo pg.public.orders; route riêng bảng orders sang
+    # topic contract version v1.0.0. Regex không match heartbeat nên heartbeat giữ nguyên.
+    transforms: routeOrdersVersion
+    transforms.routeOrdersVersion.type: org.apache.kafka.connect.transforms.RegexRouter
+    transforms.routeOrdersVersion.regex: ^pg\.public\.orders$
+    transforms.routeOrdersVersion.replacement: pg.public.orders.v1.0.0

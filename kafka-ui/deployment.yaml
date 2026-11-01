@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: kafka
+  labels:
+    app: kafka-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        workload: kafka-connect
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-ui
+          image: ghcr.io/kafbat/kafka-ui:v1.5.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: kafka-cluster
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093
+            - name: KAFKA_CLUSTERS_0_READONLY
+              value: "true"
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_LOCATION
+              value: /etc/kafka-ui/user/user.p12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-ui
+                  key: user.password
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-ui
+                  key: user.password
+            - name: KAFKA_CLUSTERS_0_SSL_TRUSTSTORELOCATION
+              value: /etc/kafka-ui/cluster-ca/ca.p12
+            - name: KAFKA_CLUSTERS_0_SSL_TRUSTSTORETYPE
+              value: PKCS12
+            - name: KAFKA_CLUSTERS_0_SSL_TRUSTSTOREPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-cluster-ca-cert
+                  key: ca.password
+            - name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME
+              value: kafka-connect
+            - name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS
+              value: http://kafka-connect-connect-api.kafka.svc.cluster.local:8083
+            - name: AUTH_TYPE
+              value: LOGIN_FORM
+            - name: SPRING_SECURITY_USER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-ui-auth
+                  key: username
+            - name: SPRING_SECURITY_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-ui-auth
+                  key: password
+            - name: DYNAMIC_CONFIG_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: cluster-ca
+              mountPath: /etc/kafka-ui/cluster-ca
+              readOnly: true
+            - name: kafka-user
+              mountPath: /etc/kafka-ui/user
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cluster-ca
+          secret:
+            secretName: kafka-cluster-cluster-ca-cert
+            defaultMode: 292 # 0444
+        - name: kafka-user
+          secret:
+            secretName: kafka-ui
+            defaultMode: 288 # 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi

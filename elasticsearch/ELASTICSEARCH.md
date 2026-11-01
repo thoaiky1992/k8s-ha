@@ -492,3 +492,44 @@ DELETE replica-template-check
 - `50Gi` mỗi PVC và `4Gi` RAM/1 vCPU mỗi pod chỉ là cấu hình khởi điểm. Tính dung lượng từ tốc độ ghi, thời gian giữ dữ liệu, số replica, watermark, shard và thời gian phục hồi; tăng PVC trước khi gần đầy. Theo dõi heap, disk, CPU, cluster health và số shard.
 - Muốn tăng dung lượng PVC, tăng `storage` trong `elasticsearch.yaml`; không giảm kích thước hoặc đổi StorageClass của PVC đã tạo. [ECK volume claim templates](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/volume-claim-templates).
 - Trước khi nâng ECK hoặc Elasticsearch, kiểm tra [tài liệu cài ECK bằng Helm](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/install) và quy trình nâng cấp tương ứng. CRD là tài nguyên toàn cluster; không xóa CRD khi chỉ gỡ một Elasticsearch cluster.
+
+## Gỡ cài đặt theo thứ tự ngược
+
+Trước khi gỡ, kiểm tra snapshot S3 gần nhất và gỡ Kibana theo [`../kibana/KIBANA.md`](../kibana/KIBANA.md). ECK operator phải còn chạy cho đến khi Elasticsearch CR đã được finalize.
+
+```bash
+export KUBE_CONTEXT="$(kubectl config current-context)"
+
+kubectl --context "$KUBE_CONTEXT" -n elasticsearch get \
+  elasticsearch/search pvc
+
+# volumeClaimDeletePolicy=DeleteOnScaledownOnly giữ PVC khi xóa Elasticsearch CR.
+kubectl --context "$KUBE_CONTEXT" delete -f elasticsearch/elasticsearch.yaml \
+  --ignore-not-found=true --wait=true
+kubectl --context "$KUBE_CONTEXT" -n elasticsearch wait --for=delete \
+  elasticsearch/search --timeout=15m || true
+
+# Chỉ uninstall operator sau khi không còn Elasticsearch/Kibana CR cần nó finalize.
+kubectl --context "$KUBE_CONTEXT" get elasticsearch,kibana -A
+helm --kube-context "$KUBE_CONTEXT" uninstall elastic-operator \
+  --namespace elastic-system --ignore-not-found --wait
+kubectl --context "$KUBE_CONTEXT" delete namespace elastic-system \
+  --ignore-not-found=true --wait=true
+```
+
+Nếu muốn giữ dữ liệu để cài lại, giữ namespace `elasticsearch`, các PVC, Secret `elastic-auth`/`elastic-roles` và ServiceAccount `elasticsearch-s3`. Không xóa StorageClass.
+
+Xóa hoàn toàn sau khi đã xác nhận snapshot có thể restore:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" delete namespace elasticsearch \
+  --ignore-not-found=true --wait=true
+
+# Chỉ xóa StorageClass khi không còn PVC nào sử dụng.
+kubectl --context "$KUBE_CONTEXT" get pvc -A \
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,SC:.spec.storageClassName'
+kubectl --context "$KUBE_CONTEXT" delete storageclass elasticsearch-gp3 \
+  --ignore-not-found=true
+```
+
+StorageClass dùng `Retain`: xóa namespace/PVC không xóa EBS volume. Kiểm tra các PV `Released`, snapshot và volume trên AWS trước khi dọn thủ công. Không xóa CRD ECK nếu cluster còn Elasticsearch/Kibana khác dùng chung operator. Bucket snapshot, IAM và Pod Identity do Terraform quản lý không bị các lệnh Kubernetes trên xóa.

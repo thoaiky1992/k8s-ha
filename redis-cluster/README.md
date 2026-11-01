@@ -727,3 +727,52 @@ Có thể chỉ chọn `--old-volumes` để giữ snapshot thêm một thời g
 - **Dọn EBS:** đã thử chế độ xem trước và `--execute` của `cleanup-ebs-restore.sh` bằng AWS/Kubernetes giả lập; chưa xóa snapshot, PV hay volume thật.
 
 Trước khi dùng cho production, chạy lại đầy đủ quy trình restore trên staging và kiểm tra: tên Service và Pod, label `role`, hostname mà operator khai báo, và phân bố AZ thực tế.
+
+## Gỡ cài đặt theo thứ tự ngược
+
+Trước khi gỡ, kiểm tra backup S3 gần nhất và gỡ RedisInsight theo [`../redisinsight/README.md`](../redisinsight/README.md). Redis operator phải còn chạy cho đến khi RedisCluster CR đã được finalize.
+
+```bash
+export KUBE_CONTEXT="$(kubectl config current-context)"
+
+# 1. Dừng job backup trước khi dừng Redis.
+kubectl --context "$KUBE_CONTEXT" -n redis-cluster delete \
+  cronjob/dev-demo-redis-cluster-backup --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" -n redis-cluster delete job --all
+
+# 2. keepAfterDelete=true giữ PVC khi operator xóa RedisCluster.
+kubectl --context "$KUBE_CONTEXT" delete -f redis-cluster/redis-cluster.yaml \
+  --ignore-not-found=true --wait=true
+kubectl --context "$KUBE_CONTEXT" -n redis-cluster wait --for=delete \
+  rediscluster/redis-cluster --timeout=15m || true
+
+# 3. Chỉ uninstall operator sau khi RedisCluster CR đã biến mất.
+helm --kube-context "$KUBE_CONTEXT" uninstall redis-cluster-operator \
+  --namespace redis-cluster-system --ignore-not-found --wait
+kubectl --context "$KUBE_CONTEXT" delete namespace redis-cluster-system \
+  --ignore-not-found=true --wait=true
+```
+
+Nếu muốn giữ dữ liệu để cài lại, giữ namespace `redis-cluster`, toàn bộ PVC, Secret `redis-cluster-auth`, Secret TLS/CA, ConfigMap và StorageClass `redis-cluster-gp3`.
+
+Xóa hoàn toàn sau khi đã xác nhận backup/restore:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" delete -f redis-cluster/backup-cronjob.yaml \
+  --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" delete -f redis-cluster/backup-configmap.yaml \
+  --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" delete -f redis-cluster/certificate.yaml \
+  --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" -n redis-cluster delete \
+  secret/redis-cluster-auth configmap/redis-cluster-config --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" delete namespace redis-cluster \
+  --ignore-not-found=true --wait=true
+
+kubectl --context "$KUBE_CONTEXT" get pv \
+  -o custom-columns='NAME:.metadata.name,STATUS:.status.phase,SC:.spec.storageClassName,CLAIM:.spec.claimRef.name'
+kubectl --context "$KUBE_CONTEXT" delete storageclass redis-cluster-gp3 \
+  --ignore-not-found=true
+```
+
+StorageClass dùng `Retain` và RedisCluster dùng `keepAfterDelete: true`; xóa PVC/namespace không xóa EBS volume. Kiểm tra PV `Released`, snapshot và EBS trước khi dọn thủ công. Bucket S3/IAM/Pod Identity do Terraform quản lý không bị các lệnh Kubernetes trên xóa. Không xóa CRD Redis operator nếu còn RedisCluster khác sử dụng.

@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dev-demo-kafka-cluster-backup
+  namespace: kafka
+data:
+  S3_BUCKET: dev-demo-kafka-cluster-backup
+  S3_PREFIX: kafka-cluster
+  backup.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${AWS_REGION:?AWS_REGION is required}"
+    : "${S3_BUCKET:?S3_BUCKET is required}"
+    : "${S3_PREFIX:?S3_PREFIX is required}"
+
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    config="/work/backup.yaml"
+    mkdir -p "${TMPDIR:-/work/tmp}"
+
+    cat >"$config" <<EOF
+    mode: backup
+    backup_id: "daily-${timestamp}"
+
+    source:
+      bootstrap_servers:
+        - kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093
+      topics:
+        include:
+          - "order-service.v1.0.0"
+          - "pg.public.orders.v1.0.0"
+      security:
+        security_protocol: SSL
+        ssl_ca_location: /etc/kafka/cluster-ca/ca.crt
+        ssl_certificate_location: /etc/kafka/user/user.crt
+        ssl_key_location: /etc/kafka/user/user.key
+
+    storage:
+      backend: s3
+      bucket: "${S3_BUCKET}"
+      region: "${AWS_REGION}"
+      prefix: "${S3_PREFIX}/"
+
+    backup:
+      compression: zstd
+      include_offset_headers: true
+      stop_at_current_offsets: true
+      max_concurrent_partitions: 6
+    EOF
+
+    kafka-backup backup --config "$config" --log-format json
+    kafka-backup validate --config "$config" --deep
+
+  restore.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${AWS_REGION:?AWS_REGION is required}"
+    : "${S3_BUCKET:?S3_BUCKET is required}"
+    : "${S3_PREFIX:?S3_PREFIX is required}"
+    : "${BACKUP_ID:?BACKUP_ID is required}"
+
+    if [ "$BACKUP_ID" = "REPLACE_BACKUP_ID" ]; then
+      echo "Set BACKUP_ID to an existing backup before running restore." >&2
+      exit 2
+    fi
+
+    config="/work/restore.yaml"
+    mkdir -p "${TMPDIR:-/work/tmp}"
+
+    cat >"$config" <<EOF
+    mode: restore
+    backup_id: "${BACKUP_ID}"
+
+    target:
+      bootstrap_servers:
+        - kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093
+      security:
+        security_protocol: SSL
+        ssl_ca_location: /etc/kafka/cluster-ca/ca.crt
+        ssl_certificate_location: /etc/kafka/user/user.crt
+        ssl_key_location: /etc/kafka/user/user.key
+
+    storage:
+      backend: s3
+      bucket: "${S3_BUCKET}"
+      region: "${AWS_REGION}"
+      prefix: "${S3_PREFIX}/"
+
+    restore:
+      topic_mapping:
+        order-service.v1.0.0: order-service.v2.0.0
+        pg.public.orders.v1.0.0: pg.public.orders.v2.0.0
+      strip_offset_headers: true
+      produce_acks: -1
+    EOF
+
+    kafka-backup validate-restore --config "$config"
+    kafka-backup restore --config "$config" --log-format json

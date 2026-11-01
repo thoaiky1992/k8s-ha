@@ -42,21 +42,66 @@ locals {
 }
 
 # Node group Elasticsearch và Kibana. Pod gắn nodeSelector workload=elasticsearch.
-resource "aws_eks_node_group" "elasticsearch" {
+# resource "aws_eks_node_group" "elasticsearch" {
+#   cluster_name    = aws_eks_cluster.eks.name
+#   version         = var.eks_version
+#   node_group_name = "elasticsearch"
+#   node_role_arn   = aws_iam_role.nodes.arn
+
+#   subnet_ids = data.terraform_remote_state.networking.outputs.values.private_subnet_ids
+
+#   capacity_type  = "ON_DEMAND"
+#   # instance_types = ["t3.medium"] # CPU: 2, RAM: 4GB, Network: Up to 5 Gbps, EBS: Up to 3.5 Gbps
+#   instance_types = ["t3.large"] # CPU: 2, RAM: 8GB, Network: Up to 5 Gbps, EBS: Up to 3.5 Gbps
+
+#   scaling_config {
+#     desired_size = 6
+#     max_size     = 10
+#     min_size     = 6
+#   }
+
+#   update_config {
+#     max_unavailable = 1
+#   }
+
+#   labels = {
+#     workload = "elasticsearch"
+#   }
+
+#   tags = local.autoscaler_node_group_tags
+
+#   depends_on = [
+#     aws_eks_cluster.eks,
+#     aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
+#     aws_iam_role_policy_attachment.amazon_eks_cni_policy,
+#     aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
+#   ]
+
+#   # Allow external changes without Terraform plan difference
+#   lifecycle {
+#     ignore_changes = [scaling_config[0].desired_size]
+#   }
+# }
+
+# Node group Kafka (Strimzi). Pod gắn nodeAffinity workload=kafka (kafka-cluster/kafka-nodepool.yaml).
+# Sáu node trên ba private subnet (mỗi AZ hai node), mỗi node chỉ chạy một broker Kafka.
+resource "aws_eks_node_group" "kafka" {
   cluster_name    = aws_eks_cluster.eks.name
   version         = var.eks_version
-  node_group_name = "elasticsearch"
+  node_group_name = "kafka"
   node_role_arn   = aws_iam_role.nodes.arn
 
   subnet_ids = data.terraform_remote_state.networking.outputs.values.private_subnet_ids
 
   capacity_type  = "ON_DEMAND"
-  # instance_types = ["t3.medium"] # CPU: 2, RAM: 4GB, Network: Up to 5 Gbps, EBS: Up to 3.5 Gbps
-  instance_types = ["t3.large"] # CPU: 2, RAM: 8GB, Network: Up to 5 Gbps, EBS: Up to 3.5 Gbps
+  # capacity_type  = "SPOT" # Spot instance giảm chi phí, nhưng có thể bị terminate bất cứ lúc nào. Nếu broker Kafka bị terminate, Strimzi sẽ tự động tạo lại broker mới trên node khác.
+  
+  # instance_types = ["m6i.xlarge"] # CPU: 4, RAM: 16GB (không burst như t3)
+  instance_types = ["m6i.large"] # CPU: 2, RAM: 8GB
 
   scaling_config {
     desired_size = 6
-    max_size     = 10
+    max_size     = 9
     min_size     = 6
   }
 
@@ -65,7 +110,51 @@ resource "aws_eks_node_group" "elasticsearch" {
   }
 
   labels = {
-    workload = "elasticsearch"
+    workload = "kafka"
+  }
+
+  tags = local.autoscaler_node_group_tags
+
+  depends_on = [
+    aws_eks_cluster.eks,
+    aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
+    aws_iam_role_policy_attachment.amazon_eks_cni_policy,
+    aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
+  ]
+
+  # Allow external changes without Terraform plan difference
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
+  }
+}
+
+# Node group Kafka Connect (Strimzi KafkaConnect). Pod gắn nodeAffinity workload=kafka-connect (kafka-cluster/kafka-connect.yaml).
+# Tách khỏi node group kafka để Debezium (snapshot, lag) không cạnh tranh CPU/RAM với broker.
+# Ba node, mỗi AZ một node, để ba worker Connect rải đều trên ba AZ.
+resource "aws_eks_node_group" "kafka_connect" {
+  cluster_name    = aws_eks_cluster.eks.name
+  version         = var.eks_version
+  node_group_name = "kafka-connect"
+  node_role_arn   = aws_iam_role.nodes.arn
+
+  subnet_ids = data.terraform_remote_state.networking.outputs.values.private_subnet_ids
+
+  capacity_type  = "ON_DEMAND"
+  # capacity_type  = "SPOT" # Spot instance giảm chi phí, nhưng có thể bị terminate bất cứ lúc nào. Nếu worker Connect bị terminate, Strimzi sẽ tự động tạo lại worker mới trên node khác.
+  instance_types = ["m6i.large"] # CPU: 2, RAM: 8GB
+
+  scaling_config {
+    desired_size = 3
+    max_size     = 6
+    min_size     = 3
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  labels = {
+    workload = "kafka-connect"
   }
 
   tags = local.autoscaler_node_group_tags

@@ -9,7 +9,8 @@ resource "helm_release" "metrics_server" {
   values = [file("${path.module}/values/metrics-server.yaml")]
 
   depends_on = [
-    aws_eks_node_group.elasticsearch,
+    aws_eks_node_group.kafka,
+    aws_eks_node_group.kafka_connect,
     # aws_eks_node_group.redis,
     # aws_eks_node_group.node_api
   ]

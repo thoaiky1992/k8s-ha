@@ -1,0 +1,32 @@
+# User mTLS read-only cho Kafbat UI. Strimzi tạo Secret kafka-ui với user.p12/user.password.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-ui
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: [Describe, Read]
+        host: "*"
+      # UI cần đọc/describe mọi consumer group để hiển thị trạng thái và lag.
+      # Đây vẫn là quyền read-only; user không có quyền ghi topic hoặc sửa cluster.
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: [Describe, Read]
+        host: "*"
+      - resource:
+          type: cluster
+        operations: [Describe]
+        host: "*"

@@ -1,0 +1,23 @@
+region = "ap-southeast-1"
+env    = "dev"
+
+networking_state = {
+  bucket = "dev-kubernetes-terraform-state"
+  key    = "networking.tfstate"
+  region = "ap-southeast-1"
+}
+
+db_identifier              = "kafka-source"
+db_name                    = "app"
+db_master_username         = "postgres_admin"
+db_engine_version          = "16.15"
+db_parameter_group_family  = "postgres16"
+db_instance_class          = "db.m6i.large" # Dùng class hỗ trợ Multi-AZ, ví dụ db.m6gd.large. Không dùng db.m6i.large (không hỗ trợ Multi-AZ).
+db_allocated_storage       = 100
+db_max_allocated_storage   = 500
+db_backup_retention_period = 7 # Số ngày giữ backup. 0 = không backup. AWS khuyến nghị >= 7 ngày.
+db_deletion_protection     = false # Khi xóa RDS, Terraform sẽ báo lỗi nếu deletion_protection = true. Nếu muốn xóa RDS, set = false.
+
+# Multi-AZ DB cluster (03.rds-multi-cluster.tf). Dùng class hỗ trợ cluster, không dùng db.m6i.large.
+db_cluster_instance_class    = "db.m6gd.large"
+db_cluster_allocated_storage = 100

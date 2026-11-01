@@ -70,7 +70,8 @@ resource "aws_eks_addon" "ebs_csi_driver" {
   service_account_role_arn = aws_iam_role.ebs_csi_driver.arn
 
   depends_on = [
-    aws_eks_node_group.elasticsearch,
+    aws_eks_node_group.kafka,
+    aws_eks_node_group.kafka_connect,
     # aws_eks_node_group.redis,
     # aws_eks_node_group.node_api
   ]

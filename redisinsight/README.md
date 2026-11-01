@@ -219,3 +219,34 @@ kubectl --context "$KUBE_CONTEXT" -n redisinsight exec deployment/redisinsight -
 - PVC Pending: kiểm tra EBS CSI, StorageClass `redis-cluster-gp3` và node/AZ.
 
 Tài liệu tham khảo: [RedisInsight trên Kubernetes](https://redis.io/docs/latest/operate/redisinsight/install/install-on-k8s/), [cấu hình RedisInsight](https://redis.io/docs/latest/operate/redisinsight/configuration/) và [Redis Cluster](https://redis.io/docs/latest/operate/oss_and_stack/management/scaling/).
+
+## Gỡ cài đặt theo thứ tự ngược
+
+Gỡ RedisInsight trước Redis Cluster. Chọn rõ giữ hay xóa PVC vì PVC chứa connection, mật khẩu đã mã hóa và lịch sử Workbench.
+
+```bash
+export KUBE_CONTEXT="$(kubectl config current-context)"
+
+kubectl --context "$KUBE_CONTEXT" delete -f redisinsight/service.yaml \
+  --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" -n redisinsight wait --for=delete \
+  ingress/redisinsight --timeout=10m || true
+
+kubectl --context "$KUBE_CONTEXT" delete -f redisinsight/deployment.yaml \
+  --ignore-not-found=true
+```
+
+Nếu muốn giữ dữ liệu RedisInsight để cài lại, dừng tại đây và giữ namespace, PVC `redisinsight-data`, Secret `redisinsight` cùng ConfigMap `redis-cluster-ca`. Phải giữ đúng `RI_ENCRYPTION_KEY`; mất key thì dữ liệu nhạy cảm trong SQLite không giải mã được.
+
+Xóa hoàn toàn:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" delete -f redisinsight/pvc.yaml \
+  --ignore-not-found=true --wait=true
+kubectl --context "$KUBE_CONTEXT" -n redisinsight delete \
+  secret/redisinsight configmap/redis-cluster-ca --ignore-not-found=true
+kubectl --context "$KUBE_CONTEXT" delete namespace redisinsight \
+  --ignore-not-found=true --wait=true
+```
+
+PVC dùng StorageClass có `reclaimPolicy: Retain`; xóa PVC/namespace có thể để PV ở trạng thái `Released` và EBS volume vẫn tính phí. Kiểm tra `kubectl get pv` và chỉ xóa PV/EBS sau khi xác nhận không cần khôi phục. Xóa DNS RedisInsight bằng Terraform sau khi Ingress/ALB đã biến mất.

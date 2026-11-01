@@ -1,0 +1,9 @@
+region = "ap-southeast-1"
+env = "dev"
+eks_name = "demo"
+
+kubernetes_state = {
+  bucket = "dev-kubernetes-terraform-state"
+  key    = "kubernetes.tfstate.tfstate"
+  region = "ap-southeast-1"
+}

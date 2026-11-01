@@ -1,0 +1,67 @@
+# User mTLS chỉ dùng cho job backup. Quyền chỉ đọc đúng các topic cần backup.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-backup
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: order-service.v1.0.0
+          patternType: literal
+        operations: [Describe, DescribeConfigs, Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: pg.public.orders.v1.0.0
+          patternType: literal
+        operations: [Describe, DescribeConfigs, Read]
+        host: "*"
+      - resource:
+          type: group
+          name: kafka-backup-
+          patternType: prefix
+        operations: [Describe, Read]
+        host: "*"
+      - resource:
+          type: cluster
+        operations: [Describe]
+        host: "*"
+---
+# User restore tách riêng, chỉ được ghi vào đúng hai topic v2 của restore drill.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-restore
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: order-service.v2.0.0
+          patternType: literal
+        operations: [Create, Describe, DescribeConfigs, Read, Write]
+        host: "*"
+      - resource:
+          type: topic
+          name: pg.public.orders.v2.0.0
+          patternType: literal
+        operations: [Create, Describe, DescribeConfigs, Read, Write]
+        host: "*"
+      - resource:
+          type: cluster
+        operations: [Describe]
+        host: "*"

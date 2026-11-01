@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dev-demo-kafka-cluster-backup
+  namespace: kafka
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dev-demo-kafka-cluster-backup
+  namespace: kafka
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Asia/Ho_Chi_Minh
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: dev-demo-kafka-cluster-backup
+        spec:
+          serviceAccountName: dev-demo-kafka-cluster-backup
+          automountServiceAccountToken: true
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              # Docker Hub latest=0.26.1 tại lúc kiểm thử; pin digest để tránh drift.
+              image: osodevops/kafka-backup@sha256:6f2368e955a84c63afcc76bfac76dedfbd772eac40274d46a58be7b0c6dba40d
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/backup-script/backup.sh"]
+              env:
+                - name: HOME
+                  value: /work
+                - name: TMPDIR
+                  value: /work/tmp
+                - name: AWS_REGION
+                  value: ap-southeast-1
+                - name: S3_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: dev-demo-kafka-cluster-backup
+                      key: S3_BUCKET
+                - name: S3_PREFIX
+                  valueFrom:
+                    configMapKeyRef:
+                      name: dev-demo-kafka-cluster-backup
+                      key: S3_PREFIX
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /backup-script
+                  readOnly: true
+                - name: cluster-ca
+                  mountPath: /etc/kafka/cluster-ca
+                  readOnly: true
+                - name: kafka-user
+                  mountPath: /etc/kafka/user
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                  ephemeral-storage: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                  ephemeral-storage: 10Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+          volumes:
+            - name: backup-script
+              configMap:
+                name: dev-demo-kafka-cluster-backup
+                defaultMode: 365 # 0555
+            - name: cluster-ca
+              secret:
+                secretName: kafka-cluster-cluster-ca-cert
+                defaultMode: 292 # 0444
+            - name: kafka-user
+              secret:
+                secretName: kafka-backup
+                defaultMode: 288 # 0440
+            - name: work
+              emptyDir:
+                sizeLimit: 10Gi

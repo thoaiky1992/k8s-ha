@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: kafka
+  labels:
+    app: kafka-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kafka-ui
+  namespace: kafka
+  annotations:
+    # Controller tự tìm ACM certificate khớp host aws-kafka-ui.thoaiky.com.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/inbound-cidrs: 113.161.39.68/32
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/success-codes: "200-399"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: aws-kafka-ui.thoaiky.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kafka-ui
+                port:
+                  number: 8080
